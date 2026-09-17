@@ -167,25 +167,20 @@ export default function EditarCotizacion() {
       if (notas.trim() !== orig.notas.trim()) {
         logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Notas", dato_anterior: orig.notas || "(vacío)", dato_nuevo: notas.trim() || "(vacío)" });
       }
-      const normalize = (arr: ItemRow[]) =>
-        arr.filter((it) => it.descripcion).map((it) => ({
-          envase_id:       it.envase_id ?? null,
-          descripcion:     it.descripcion.trim(),
-          cantidad:        Number(it.cantidad),
-          precio_unitario: Math.round(Number(it.precio_unitario) * 100),
-          descuento:       Math.round(Number(it.descuento) * 100),
-        }));
-      const origItems = JSON.parse(orig.itemsHash) as ItemRow[];
-      const origNorm  = JSON.stringify(normalize(origItems));
-      const newNorm   = JSON.stringify(normalize(items));
-      if (origNorm !== newNorm) {
-        const origCount = origItems.filter((it) => it.descripcion).length;
-        const newCount  = items.filter((it) => it.descripcion).length;
-        if (origCount !== newCount) {
-          logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""}`, dato_nuevo: `${newCount} línea${newCount !== 1 ? "s" : ""}` });
-        } else {
-          logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""} (precio / cantidad)`, dato_nuevo: "Actualizado" });
-        }
+      const origItems   = JSON.parse(orig.itemsHash) as ItemRow[];
+      const origCount   = origItems.filter((it) => it.descripcion).length;
+      const newCount    = items.filter((it) => it.descripcion).length;
+      const origDescs   = origItems.filter((it) => it.descripcion).map((it) => it.descripcion.trim()).join("|");
+      const newDescs    = items.filter((it) => it.descripcion).map((it) => it.descripcion.trim()).join("|");
+      const origPrices  = origItems.filter((it) => it.descripcion).map((it) => `${Math.round(Number(it.cantidad))}x${Math.round(Number(it.precio_unitario) * 100)}`).join("|");
+      const newPrices   = items.filter((it) => it.descripcion).map((it) => `${Math.round(Number(it.cantidad))}x${Math.round(Number(it.precio_unitario) * 100)}`).join("|");
+
+      if (origCount !== newCount) {
+        logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""}`, dato_nuevo: `${newCount} línea${newCount !== 1 ? "s" : ""}` });
+      } else if (origDescs !== newDescs) {
+        logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""}`, dato_nuevo: "Descripciones actualizadas" });
+      } else if (origPrices !== newPrices) {
+        logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""}`, dato_nuevo: "Precios / cantidades actualizados" });
       }
     }
 
