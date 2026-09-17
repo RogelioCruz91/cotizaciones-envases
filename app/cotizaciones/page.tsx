@@ -1,18 +1,14 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 import { fmt, ESTADO_COLOR, type Cotizacion } from "@/lib/supabase";
 
-// Fresh client per component — required for Supabase Realtime
-const supabase = createClient(
-  "https://gamnenyakraafruvbkin.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdhbW5lbnlha3JhYWZydXZia2luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NzU4NDQsImV4cCI6MjA4NTU1MTg0NH0.UpolMRzWNfd4hqBeYvnTrrvDu1C1rmrNXKvnO82y_OQ"
-);
+const SUPABASE_URL = "https://gamnenyakraafruvbkin.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdhbW5lbnlha3JhYWZydXZia2luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NzU4NDQsImV4cCI6MjA4NTU1MTg0NH0.UpolMRzWNfd4hqBeYvnTrrvDu1C1rmrNXKvnO82y_OQ";
 
 const ESTADOS = ["todos", "borrador", "enviada", "aprobada", "rechazada"] as const;
 
-// Highlight state: cotizacion id → css class
 type HlMap = Record<number, string>;
 
 export default function CotizacionesPage() {
@@ -22,65 +18,70 @@ export default function CotizacionesPage() {
   const [filtroEstado, setFiltroEstado] = useState("todos");
   const [search, setSearch]             = useState("");
   const [highlights, setHighlights]     = useState<HlMap>({});
+  // Own Supabase client per component instance (required for Realtime)
+  const sbRef = useRef(createClient(SUPABASE_URL, SUPABASE_ANON));
 
   function highlight(id: number, cls: string) {
     setHighlights((prev) => ({ ...prev, [id]: cls }));
     setTimeout(() => setHighlights((prev) => { const n = { ...prev }; delete n[id]; return n; }), 2500);
   }
 
-  async function fetchCotizacion(id: number): Promise<Cotizacion | null> {
-    const { data } = await supabase
+  async function loadAll() {
+    const sb = sbRef.current;
+    const { data } = await sb
       .from("env_cotizaciones")
       .select("*, env_clientes(nombre,empresa)")
-      .eq("id", id)
-      .single();
-    return data as Cotizacion | null;
+      .order("created_at", { ascending: false });
+    setCotizaciones((data ?? []) as Cotizacion[]);
+    setLoading(false);
   }
 
   useEffect(() => {
-    // Initial load
-    supabase
-      .from("env_cotizaciones")
-      .select("*, env_clientes(nombre,empresa)")
-      .order("created_at", { ascending: false })
-      .then(({ data }) => { setCotizaciones((data ?? []) as Cotizacion[]); setLoading(false); });
+    const sb = sbRef.current;
+    loadAll();
 
-    // Realtime subscription
-    const channel = supabase
-      .channel("env_cotizaciones_rt")
+    // Unique channel name per mount to avoid cross-tab conflicts
+    const channelName = `cotizaciones_rt_${Math.random().toString(36).slice(2)}`;
+
+    const channel = sb
+      .channel(channelName)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "env_cotizaciones" },
-        async ({ new: row }) => {
-          // Fetch with joins since CDC payload lacks related data
-          const full = await fetchCotizacion(row.id as number);
-          if (!full) return;
-          setCotizaciones((prev) => [full, ...prev]);
-          highlight(full.id, "bg-green-900/40");
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "env_cotizaciones" },
-        async ({ new: row }) => {
-          const full = await fetchCotizacion(row.id as number);
-          if (!full) return;
-          setCotizaciones((prev) =>
-            prev.map((c) => (c.id === full.id ? full : c))
-          );
-          highlight(full.id, "bg-amber-900/40");
+        { event: "*", schema: "public", table: "env_cotizaciones" },
+        async (payload) => {
+          if (payload.eventType === "INSERT") {
+            const { data: full } = await sb
+              .from("env_cotizaciones")
+              .select("*, env_clientes(nombre,empresa)")
+              .eq("id", (payload.new as { id: number }).id)
+              .single();
+            if (!full) return;
+            setCotizaciones((prev) => [full as Cotizacion, ...prev]);
+            highlight((full as Cotizacion).id, "bg-green-900/40");
+          } else if (payload.eventType === "UPDATE") {
+            const { data: full } = await sb
+              .from("env_cotizaciones")
+              .select("*, env_clientes(nombre,empresa)")
+              .eq("id", (payload.new as { id: number }).id)
+              .single();
+            if (!full) return;
+            setCotizaciones((prev) =>
+              prev.map((c) => (c.id === (full as Cotizacion).id ? (full as Cotizacion) : c))
+            );
+            highlight((full as Cotizacion).id, "bg-amber-900/40");
+          }
         }
       )
       .subscribe((status) => {
         setRealtimeOk(status === "SUBSCRIBED");
       });
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { sb.removeChannel(channel); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function cambiarEstado(id: number, estado: string) {
-    await supabase.from("env_cotizaciones").update({ estado }).eq("id", id);
+    await sbRef.current.from("env_cotizaciones").update({ estado }).eq("id", id);
     // Realtime UPDATE event will handle the UI update
   }
 
