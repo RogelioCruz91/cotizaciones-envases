@@ -41,7 +41,8 @@ export default function EditarCotizacion() {
   const [descGlobal, setDescGlobal] = useState(0);
   const [items, setItems] = useState<ItemRow[]>([]);
   const [numero, setNumero] = useState("");
-  const originalRef = useRef<Original | null>(null);
+  const originalRef  = useRef<Original | null>(null);
+  const itemsTouched = useRef(false);
 
   useEffect(() => {
     Promise.all([
@@ -92,12 +93,18 @@ export default function EditarCotizacion() {
     });
   }, [id]);
 
-  const addItem = () =>
+  const addItem = () => {
+    itemsTouched.current = true;
     setItems((prev) => [...prev, { envase_id: null, descripcion: "", cantidad: 1, precio_unitario: 0, descuento: 0 }]);
+  };
 
-  const removeItem = (i: number) => setItems((prev) => prev.filter((_, idx) => idx !== i));
+  const removeItem = (i: number) => {
+    itemsTouched.current = true;
+    setItems((prev) => prev.filter((_, idx) => idx !== i));
+  };
 
   const updateItem = useCallback((i: number, field: keyof ItemRow, value: string | number) => {
+    itemsTouched.current = true;
     setItems((prev) => {
       const next = [...prev];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -167,20 +174,14 @@ export default function EditarCotizacion() {
       if (notas.trim() !== orig.notas.trim()) {
         logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Notas", dato_anterior: orig.notas || "(vacío)", dato_nuevo: notas.trim() || "(vacío)" });
       }
-      const origItems   = JSON.parse(orig.itemsHash) as ItemRow[];
-      const origCount   = origItems.filter((it) => it.descripcion).length;
-      const newCount    = items.filter((it) => it.descripcion).length;
-      const origDescs   = origItems.filter((it) => it.descripcion).map((it) => it.descripcion.trim()).join("|");
-      const newDescs    = items.filter((it) => it.descripcion).map((it) => it.descripcion.trim()).join("|");
-      const origPrices  = origItems.filter((it) => it.descripcion).map((it) => `${Math.round(Number(it.cantidad))}x${Math.round(Number(it.precio_unitario) * 100)}`).join("|");
-      const newPrices   = items.filter((it) => it.descripcion).map((it) => `${Math.round(Number(it.cantidad))}x${Math.round(Number(it.precio_unitario) * 100)}`).join("|");
-
-      if (origCount !== newCount) {
-        logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""}`, dato_nuevo: `${newCount} línea${newCount !== 1 ? "s" : ""}` });
-      } else if (origDescs !== newDescs) {
-        logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""}`, dato_nuevo: "Descripciones actualizadas" });
-      } else if (origPrices !== newPrices) {
-        logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""}`, dato_nuevo: "Precios / cantidades actualizados" });
+      if (itemsTouched.current) {
+        const origCount = (JSON.parse(orig.itemsHash) as ItemRow[]).filter((it) => it.descripcion).length;
+        const newCount  = items.filter((it) => it.descripcion).length;
+        if (origCount !== newCount) {
+          logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""}`, dato_nuevo: `${newCount} línea${newCount !== 1 ? "s" : ""}` });
+        } else {
+          logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""}`, dato_nuevo: "Actualizado" });
+        }
       }
     }
 
