@@ -28,9 +28,18 @@ export default function ImprimirCotizacion() {
     <>
       <style>{`
         @media print {
-          body { background: white !important; }
+          body {
+            display: block !important;
+            overflow: visible !important;
+            background: white !important;
+          }
+          aside { display: none !important; }
+          main {
+            padding: 0 !important;
+            overflow: visible !important;
+          }
           .no-print { display: none !important; }
-          .print-page { box-shadow: none !important; }
+          .print-page { box-shadow: none !important; margin: 0 !important; }
         }
         body { background: #e2e8f0; }
       `}</style>
