@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { supabase, fmt, IGV, CAT_COLOR, type Cliente, type Envase } from "@/lib/supabase";
+import { supabase, fmt, IGV, type Cliente, type Envase } from "@/lib/supabase";
 import { getUsuario } from "@/lib/usuario";
+import { Modal, ModalNuevoCliente, ModalNuevoEnvase } from "@/components/QuickCreate";
 
 type ItemRow = {
   envase_id: number | null;
@@ -16,6 +17,7 @@ function calcItem(item: ItemRow) {
   return item.cantidad * item.precio_unitario * (1 - item.descuento / 100);
 }
 
+// ── Main page ─────────────────────────────────────────────────────
 export default function NuevaCotizacion() {
   const router = useRouter();
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -30,6 +32,11 @@ export default function NuevaCotizacion() {
     { envase_id: null, descripcion: "", cantidad: 1, precio_unitario: 0, descuento: 0 },
   ]);
 
+  // Modal state — which row triggered the envase modal
+  const [modalCliente, setModalCliente] = useState(false);
+  const [modalEnvase,  setModalEnvase]  = useState(false);
+  const pendingRowRef = useRef<number | null>(null);
+
   useEffect(() => {
     Promise.all([
       supabase.from("env_clientes").select("*").order("empresa"),
@@ -39,6 +46,24 @@ export default function NuevaCotizacion() {
       setEnvases((e ?? []) as Envase[]);
     });
   }, []);
+
+  function onClienteCreado(c: Cliente) {
+    setClientes((prev) => [...prev, c].sort((a, b) => a.empresa.localeCompare(b.empresa)));
+    setClienteId(c.id);
+  }
+
+  function onEnvaseCreado(env: Envase) {
+    setEnvases((prev) => [...prev, env].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+    const row = pendingRowRef.current;
+    if (row !== null) {
+      setItems((prev) => {
+        const next = [...prev];
+        next[row] = { ...next[row], envase_id: env.id, descripcion: env.nombre, precio_unitario: env.precio_unitario };
+        return next;
+      });
+      pendingRowRef.current = null;
+    }
+  }
 
   const addItem = () =>
     setItems((prev) => [...prev, { envase_id: null, descripcion: "", cantidad: 1, precio_unitario: 0, descuento: 0 }]);
@@ -50,22 +75,18 @@ export default function NuevaCotizacion() {
       const next = [...prev];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (next[i] as any)[field] = value;
-      // Auto-fill price when selecting an envase
       if (field === "envase_id" && value) {
         const env = envases.find((e) => e.id === Number(value));
-        if (env) {
-          next[i].precio_unitario = env.precio_unitario;
-          next[i].descripcion = env.nombre;
-        }
+        if (env) { next[i].precio_unitario = env.precio_unitario; next[i].descripcion = env.nombre; }
       }
       return next;
     });
   }, [envases]);
 
-  const subtotalItems = items.reduce((s, it) => s + calcItem(it), 0);
+  const subtotalItems   = items.reduce((s, it) => s + calcItem(it), 0);
   const subtotalConDesc = subtotalItems * (1 - descGlobal / 100);
-  const igvMonto = subtotalConDesc * IGV;
-  const total = subtotalConDesc + igvMonto;
+  const igvMonto        = subtotalConDesc * IGV;
+  const total           = subtotalConDesc + igvMonto;
 
   async function guardar() {
     if (!clienteId || items.every((it) => !it.descripcion)) return;
@@ -75,36 +96,21 @@ export default function NuevaCotizacion() {
     const numero = `COT-${new Date().getFullYear()}-${String((count ?? 0) + 1).padStart(4, "0")}`;
 
     const { data: cot } = await supabase.from("env_cotizaciones").insert({
-      numero,
-      cliente_id: clienteId,
-      estado: "borrador",
-      subtotal: subtotalConDesc,
-      igv: igvMonto,
-      total,
-      descuento_global: descGlobal,
-      notas,
-      vigencia_dias: vigencia,
+      numero, cliente_id: clienteId, estado: "borrador",
+      subtotal: subtotalConDesc, igv: igvMonto, total,
+      descuento_global: descGlobal, notas, vigencia_dias: vigencia,
     }).select().single();
 
     if (cot) {
       await supabase.from("env_cotizacion_items").insert(
-        items
-          .filter((it) => it.descripcion)
-          .map((it) => ({
-            cotizacion_id: cot.id,
-            envase_id: it.envase_id || null,
-            descripcion: it.descripcion,
-            cantidad: it.cantidad,
-            precio_unitario: it.precio_unitario,
-            descuento: it.descuento,
-            subtotal: calcItem(it),
-          }))
+        items.filter((it) => it.descripcion).map((it) => ({
+          cotizacion_id: cot.id, envase_id: it.envase_id || null,
+          descripcion: it.descripcion, cantidad: it.cantidad,
+          precio_unitario: it.precio_unitario, descuento: it.descuento, subtotal: calcItem(it),
+        }))
       );
       await supabase.from("env_actividad").insert({
-        cotizacion_id: cot.id,
-        usuario: getUsuario(),
-        tipo: "creacion",
-        descripcion: "Cotización creada",
+        cotizacion_id: cot.id, usuario: getUsuario(), tipo: "creacion", descripcion: "Cotización creada",
       });
       router.push(`/cotizaciones/${cot.id}`);
     }
@@ -113,6 +119,19 @@ export default function NuevaCotizacion() {
 
   return (
     <div className="max-w-4xl">
+
+      {/* Modales */}
+      {modalCliente && (
+        <Modal title="Nuevo Cliente" onClose={() => setModalCliente(false)}>
+          <ModalNuevoCliente onClose={() => setModalCliente(false)} onCreado={onClienteCreado} />
+        </Modal>
+      )}
+      {modalEnvase && (
+        <Modal title="Nuevo Producto / Envase" onClose={() => setModalEnvase(false)}>
+          <ModalNuevoEnvase onClose={() => setModalEnvase(false)} onCreado={onEnvaseCreado} />
+        </Modal>
+      )}
+
       <div className="flex items-center gap-4 mb-6">
         <button onClick={() => router.back()} className="text-slate-400 hover:text-white text-sm">← Volver</button>
         <h1 className="text-2xl font-bold">Nueva Cotización</h1>
@@ -122,7 +141,16 @@ export default function NuevaCotizacion() {
       <div className="bg-slate-800 rounded-xl border border-slate-700 p-5 mb-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Cliente *</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs text-slate-400">Cliente *</label>
+              <button
+                type="button"
+                onClick={() => setModalCliente(true)}
+                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+              >
+                + Nuevo cliente
+              </button>
+            </div>
             <select
               className="w-full bg-slate-900 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
               value={clienteId}
@@ -151,7 +179,16 @@ export default function NuevaCotizacion() {
       <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden mb-4">
         <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
           <h2 className="font-semibold text-sm">Productos / Items</h2>
-          <button onClick={addItem} className="text-xs text-blue-400 hover:text-blue-300">+ Agregar línea</button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => { pendingRowRef.current = null; setModalEnvase(true); }}
+              className="text-xs text-green-400 hover:text-green-300"
+            >
+              + Nuevo envase
+            </button>
+            <button onClick={addItem} className="text-xs text-blue-400 hover:text-blue-300">+ Agregar línea</button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -170,16 +207,26 @@ export default function NuevaCotizacion() {
               {items.map((item, i) => (
                 <tr key={i}>
                   <td className="px-3 py-2">
-                    <select
-                      className="w-full bg-slate-900 border border-slate-600 text-white text-xs rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
-                      value={item.envase_id ?? ""}
-                      onChange={(e) => updateItem(i, "envase_id", e.target.value ? Number(e.target.value) : null as unknown as number)}
-                    >
-                      <option value="">— Libre —</option>
-                      {envases.map((e) => (
-                        <option key={e.id} value={e.id}>[{e.categoria}] {e.nombre}</option>
-                      ))}
-                    </select>
+                    <div className="flex items-center gap-1">
+                      <select
+                        className="flex-1 bg-slate-900 border border-slate-600 text-white text-xs rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+                        value={item.envase_id ?? ""}
+                        onChange={(e) => updateItem(i, "envase_id", e.target.value ? Number(e.target.value) : null as unknown as number)}
+                      >
+                        <option value="">— Libre —</option>
+                        {envases.map((e) => (
+                          <option key={e.id} value={e.id}>[{e.categoria}] {e.nombre}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        title="Crear nuevo envase y asignarlo aquí"
+                        onClick={() => { pendingRowRef.current = i; setModalEnvase(true); }}
+                        className="text-green-500 hover:text-green-300 text-base leading-none shrink-0"
+                      >
+                        +
+                      </button>
+                    </div>
                   </td>
                   <td className="px-3 py-2">
                     <input

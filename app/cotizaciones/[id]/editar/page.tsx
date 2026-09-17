@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { supabase, fmt, IGV, type Cliente, type Envase } from "@/lib/supabase";
 import { getUsuario } from "@/lib/usuario";
+import { Modal, ModalNuevoCliente, ModalNuevoEnvase } from "@/components/QuickCreate";
 
 type ItemRow = {
   envase_id: number | null;
@@ -34,6 +35,10 @@ export default function EditarCotizacion() {
   const [envases,  setEnvases]  = useState<Envase[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [saving,   setSaving]   = useState(false);
+
+  const [modalCliente, setModalCliente] = useState(false);
+  const [modalEnvase,  setModalEnvase]  = useState(false);
+  const pendingRowRef = useRef<number | null>(null);
 
   const [clienteId,  setClienteId]  = useState<number | "">("");
   const [notas,      setNotas]      = useState("");
@@ -92,6 +97,25 @@ export default function EditarCotizacion() {
       setLoading(false);
     });
   }, [id]);
+
+  function onClienteCreado(c: Cliente) {
+    setClientes((prev) => [...prev, c].sort((a, b) => a.empresa.localeCompare(b.empresa)));
+    setClienteId(c.id);
+  }
+
+  function onEnvaseCreado(env: Envase) {
+    setEnvases((prev) => [...prev, env].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+    const row = pendingRowRef.current;
+    if (row !== null) {
+      itemsTouched.current = true;
+      setItems((prev) => {
+        const next = [...prev];
+        next[row] = { ...next[row], envase_id: env.id, descripcion: env.nombre, precio_unitario: env.precio_unitario };
+        return next;
+      });
+      pendingRowRef.current = null;
+    }
+  }
 
   const addItem = () => {
     itemsTouched.current = true;
@@ -220,6 +244,18 @@ export default function EditarCotizacion() {
 
   return (
     <div className="max-w-4xl">
+
+      {modalCliente && (
+        <Modal title="Nuevo Cliente" onClose={() => setModalCliente(false)}>
+          <ModalNuevoCliente onClose={() => setModalCliente(false)} onCreado={onClienteCreado} />
+        </Modal>
+      )}
+      {modalEnvase && (
+        <Modal title="Nuevo Producto / Envase" onClose={() => setModalEnvase(false)}>
+          <ModalNuevoEnvase onClose={() => setModalEnvase(false)} onCreado={onEnvaseCreado} />
+        </Modal>
+      )}
+
       <div className="flex items-center gap-4 mb-6">
         <button onClick={() => router.back()} className="text-slate-400 hover:text-white text-sm">← Volver</button>
         <h1 className="text-2xl font-bold">Editar {numero}</h1>
@@ -229,7 +265,10 @@ export default function EditarCotizacion() {
       <div className="bg-slate-800 rounded-xl border border-slate-700 p-5 mb-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Cliente *</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs text-slate-400">Cliente *</label>
+              <button type="button" onClick={() => setModalCliente(true)} className="text-xs text-blue-400 hover:text-blue-300">+ Nuevo cliente</button>
+            </div>
             <select
               className="w-full bg-slate-900 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
               value={clienteId}
@@ -260,7 +299,10 @@ export default function EditarCotizacion() {
       <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden mb-4">
         <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
           <h2 className="font-semibold text-sm">Productos / Items</h2>
-          <button onClick={addItem} className="text-xs text-blue-400 hover:text-blue-300">+ Agregar línea</button>
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={() => { pendingRowRef.current = null; setModalEnvase(true); }} className="text-xs text-green-400 hover:text-green-300">+ Nuevo envase</button>
+            <button onClick={addItem} className="text-xs text-blue-400 hover:text-blue-300">+ Agregar línea</button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -279,16 +321,19 @@ export default function EditarCotizacion() {
               {items.map((item, i) => (
                 <tr key={i}>
                   <td className="px-3 py-2">
-                    <select
-                      className="w-full bg-slate-900 border border-slate-600 text-white text-xs rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
-                      value={item.envase_id ?? ""}
-                      onChange={(e) => updateItem(i, "envase_id", e.target.value ? Number(e.target.value) : null as unknown as number)}
-                    >
-                      <option value="">— Libre —</option>
-                      {envases.map((e) => (
-                        <option key={e.id} value={e.id}>[{e.categoria}] {e.nombre}</option>
-                      ))}
-                    </select>
+                    <div className="flex items-center gap-1">
+                      <select
+                        className="flex-1 bg-slate-900 border border-slate-600 text-white text-xs rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+                        value={item.envase_id ?? ""}
+                        onChange={(e) => updateItem(i, "envase_id", e.target.value ? Number(e.target.value) : null as unknown as number)}
+                      >
+                        <option value="">— Libre —</option>
+                        {envases.map((e) => (
+                          <option key={e.id} value={e.id}>[{e.categoria}] {e.nombre}</option>
+                        ))}
+                      </select>
+                      <button type="button" title="Crear nuevo envase" onClick={() => { pendingRowRef.current = i; setModalEnvase(true); }} className="text-green-500 hover:text-green-300 text-base leading-none shrink-0">+</button>
+                    </div>
                   </td>
                   <td className="px-3 py-2">
                     <input
