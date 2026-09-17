@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, fmt, IGV, CAT_COLOR, type Cliente, type Envase } from "@/lib/supabase";
+import { getUsuario } from "@/lib/usuario";
 
 type ItemRow = {
   envase_id: number | null;
@@ -99,6 +100,12 @@ export default function NuevaCotizacion() {
             subtotal: calcItem(it),
           }))
       );
+      await supabase.from("env_actividad").insert({
+        cotizacion_id: cot.id,
+        usuario: getUsuario(),
+        tipo: "creacion",
+        descripcion: "Cotización creada",
+      });
       router.push(`/cotizaciones/${cot.id}`);
     }
     setSaving(false);

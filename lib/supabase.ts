@@ -75,6 +75,17 @@ export const ESTADO_COLOR: Record<string, string> = {
   rechazada: "bg-red-900 text-red-300",
 };
 
+export type Actividad = {
+  id: number;
+  cotizacion_id: number;
+  usuario: string;
+  tipo: string;
+  descripcion: string;
+  dato_anterior: string | null;
+  dato_nuevo: string | null;
+  created_at: string;
+};
+
 export const CAT_COLOR: Record<string, string> = {
   "Big Bag":         "bg-orange-900/60 text-orange-300",
   "Bulk Bag":        "bg-amber-900/60 text-amber-300",
