@@ -1,0 +1,112 @@
+"use client";
+import { useEffect, useState } from "react";
+import { supabase, type Cliente } from "@/lib/supabase";
+
+export default function ClientesPage() {
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [form, setForm]         = useState({ nombre: "", empresa: "", ruc: "", email: "", telefono: "", direccion: "" });
+  const [saving, setSaving]     = useState(false);
+  const [search, setSearch]     = useState("");
+
+  async function cargar() {
+    const { data } = await supabase.from("env_clientes").select("*").order("empresa");
+    setClientes((data ?? []) as Cliente[]);
+    setLoading(false);
+  }
+  useEffect(() => { cargar(); }, []);
+
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.nombre || !form.empresa) return;
+    setSaving(true);
+    await supabase.from("env_clientes").insert(form);
+    setForm({ nombre: "", empresa: "", ruc: "", email: "", telefono: "", direccion: "" });
+    setSaving(false);
+    cargar();
+  }
+
+  const filtrados = clientes.filter((c) =>
+    `${c.nombre} ${c.empresa} ${c.ruc ?? ""}`.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">Clientes</h1>
+        <span className="text-slate-400 text-sm">{clientes.length} registrados</span>
+      </div>
+
+      {/* Form */}
+      <form onSubmit={guardar} className="bg-slate-800 rounded-xl border border-slate-700 p-5 mb-6">
+        <h2 className="font-semibold text-sm mb-4 text-slate-300">Nuevo cliente</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {[
+            { key: "nombre",    label: "Nombre contacto *", placeholder: "Juan Pérez" },
+            { key: "empresa",   label: "Empresa *",         placeholder: "Agroindustrias SAC" },
+            { key: "ruc",       label: "RUC",               placeholder: "20123456789" },
+            { key: "email",     label: "Email",             placeholder: "contacto@empresa.pe" },
+            { key: "telefono",  label: "Teléfono",          placeholder: "999 123 456" },
+            { key: "direccion", label: "Dirección",         placeholder: "Av. Principal 123" },
+          ].map(({ key, label, placeholder }) => (
+            <div key={key}>
+              <label className="block text-xs text-slate-400 mb-1">{label}</label>
+              <input
+                className="w-full bg-slate-900 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+                placeholder={placeholder}
+                value={form[key as keyof typeof form]}
+                onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+              />
+            </div>
+          ))}
+        </div>
+        <button
+          type="submit"
+          disabled={saving}
+          className="mt-4 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-sm px-5 py-2 rounded-lg transition-colors"
+        >
+          {saving ? "Guardando..." : "Agregar cliente"}
+        </button>
+      </form>
+
+      {/* Search + list */}
+      <div className="mb-3">
+        <input
+          className="w-full max-w-sm bg-slate-800 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+          placeholder="Buscar por nombre, empresa o RUC..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
+      <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-700 text-slate-400 text-xs uppercase">
+              <th className="text-left px-4 py-3">Empresa</th>
+              <th className="text-left px-4 py-3">Contacto</th>
+              <th className="text-left px-4 py-3">RUC</th>
+              <th className="text-left px-4 py-3">Email</th>
+              <th className="text-left px-4 py-3">Teléfono</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-700">
+            {loading ? (
+              <tr><td colSpan={5} className="text-center text-slate-500 py-8">Cargando...</td></tr>
+            ) : filtrados.length === 0 ? (
+              <tr><td colSpan={5} className="text-center text-slate-500 py-8">Sin clientes.</td></tr>
+            ) : filtrados.map((c) => (
+              <tr key={c.id} className="hover:bg-slate-700/40 transition-colors">
+                <td className="px-4 py-3 font-medium text-white">{c.empresa}</td>
+                <td className="px-4 py-3 text-slate-300">{c.nombre}</td>
+                <td className="px-4 py-3 text-slate-400 font-mono text-xs">{c.ruc ?? "—"}</td>
+                <td className="px-4 py-3 text-slate-400 text-xs">{c.email ?? "—"}</td>
+                <td className="px-4 py-3 text-slate-400">{c.telefono ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
