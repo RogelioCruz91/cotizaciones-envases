@@ -9,7 +9,9 @@ const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 
 const ESTADOS = ["todos", "borrador", "enviada", "aprobada", "rechazada"] as const;
 
-type HlMap = Record<number, string>;
+type BadgeMap = Record<number, "nuevo" | "actualizado">;
+
+const BADGE_MS = 5 * 60 * 1000; // 5 minutos
 
 export default function CotizacionesPage() {
   const [cotizaciones, setCotizaciones] = useState<Cotizacion[]>([]);
@@ -17,13 +19,15 @@ export default function CotizacionesPage() {
   const [realtimeOk, setRealtimeOk]     = useState<boolean | null>(null);
   const [filtroEstado, setFiltroEstado] = useState("todos");
   const [search, setSearch]             = useState("");
-  const [highlights, setHighlights]     = useState<HlMap>({});
-  // Own Supabase client per component instance (required for Realtime)
+  const [badges, setBadges]             = useState<BadgeMap>({});
   const sbRef = useRef(createClient(SUPABASE_URL, SUPABASE_ANON));
 
-  function highlight(id: number, cls: string) {
-    setHighlights((prev) => ({ ...prev, [id]: cls }));
-    setTimeout(() => setHighlights((prev) => { const n = { ...prev }; delete n[id]; return n; }), 2500);
+  function addBadge(id: number, tipo: "nuevo" | "actualizado") {
+    setBadges((prev) => ({ ...prev, [id]: tipo }));
+    setTimeout(
+      () => setBadges((prev) => { const n = { ...prev }; delete n[id]; return n; }),
+      BADGE_MS
+    );
   }
 
   async function loadAll() {
@@ -40,7 +44,6 @@ export default function CotizacionesPage() {
     const sb = sbRef.current;
     loadAll();
 
-    // Unique channel name per mount to avoid cross-tab conflicts
     const channelName = `cotizaciones_rt_${Math.random().toString(36).slice(2)}`;
 
     const channel = sb
@@ -57,7 +60,7 @@ export default function CotizacionesPage() {
               .single();
             if (!full) return;
             setCotizaciones((prev) => [full as Cotizacion, ...prev]);
-            highlight((full as Cotizacion).id, "bg-green-900/40");
+            addBadge((full as Cotizacion).id, "nuevo");
           } else if (payload.eventType === "UPDATE") {
             const { data: full } = await sb
               .from("env_cotizaciones")
@@ -68,7 +71,7 @@ export default function CotizacionesPage() {
             setCotizaciones((prev) =>
               prev.map((c) => (c.id === (full as Cotizacion).id ? (full as Cotizacion) : c))
             );
-            highlight((full as Cotizacion).id, "bg-amber-900/40");
+            addBadge((full as Cotizacion).id, "actualizado");
           }
         }
       )
@@ -82,7 +85,6 @@ export default function CotizacionesPage() {
 
   async function cambiarEstado(id: number, estado: string) {
     await sbRef.current.from("env_cotizaciones").update({ estado }).eq("id", id);
-    // Realtime UPDATE event will handle the UI update
   }
 
   const filtradas = cotizaciones
@@ -162,54 +164,75 @@ export default function CotizacionesPage() {
               <tr><td colSpan={6} className="text-center text-slate-500 py-10">Cargando...</td></tr>
             ) : filtradas.length === 0 ? (
               <tr><td colSpan={6} className="text-center text-slate-500 py-10">Sin cotizaciones.</td></tr>
-            ) : filtradas.map((c) => (
-              <tr
-                key={c.id}
-                className={`transition-colors duration-700 ${highlights[c.id] ?? "hover:bg-slate-700/40"}`}
-              >
-                <td className="px-4 py-3">
-                  <Link href={`/cotizaciones/${c.id}`} className="text-blue-400 hover:underline font-mono font-medium">
-                    {c.numero}
-                  </Link>
-                </td>
-                <td className="px-4 py-3">
-                  <p className="text-white">{c.env_clientes?.empresa ?? "—"}</p>
-                  <p className="text-slate-500 text-xs">{c.env_clientes?.nombre ?? ""}</p>
-                </td>
-                <td className="px-4 py-3 text-slate-400 text-xs">
-                  {new Date(c.created_at).toLocaleDateString("es-PE")}
-                </td>
-                <td className="px-4 py-3 text-right font-mono font-bold text-blue-300">
-                  S/ {fmt(Number(c.total))}
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${ESTADO_COLOR[c.estado]}`}>
-                    {c.estado}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <div className="flex items-center justify-center gap-1 flex-wrap">
-                    <Link href={`/cotizaciones/${c.id}`} className="text-xs text-blue-400 hover:underline">Ver</Link>
-                    <span className="text-slate-600">|</span>
-                    <Link href={`/cotizaciones/${c.id}/imprimir`} className="text-xs text-slate-400 hover:text-white">Imprimir</Link>
-                    {c.estado === "borrador" && (
-                      <>
-                        <span className="text-slate-600">|</span>
-                        <button onClick={() => cambiarEstado(c.id, "enviada")} className="text-xs text-yellow-400 hover:underline">Enviar</button>
-                      </>
-                    )}
-                    {c.estado === "enviada" && (
-                      <>
-                        <span className="text-slate-600">|</span>
-                        <button onClick={() => cambiarEstado(c.id, "aprobada")} className="text-xs text-green-400 hover:underline">Aprobar</button>
-                        <span className="text-slate-600">|</span>
-                        <button onClick={() => cambiarEstado(c.id, "rechazada")} className="text-xs text-red-400 hover:underline">Rechazar</button>
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
+            ) : filtradas.map((c) => {
+              const badge = badges[c.id];
+              return (
+                <tr
+                  key={c.id}
+                  className={`transition-colors duration-700 ${
+                    badge === "nuevo"
+                      ? "bg-green-950/40"
+                      : badge === "actualizado"
+                      ? "bg-amber-950/40"
+                      : "hover:bg-slate-700/40"
+                  }`}
+                >
+                  <td className="px-4 py-3">
+                    <Link href={`/cotizaciones/${c.id}`} className="text-blue-400 hover:underline font-mono font-medium">
+                      {c.numero}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-3">
+                    <p className="text-white">{c.env_clientes?.empresa ?? "—"}</p>
+                    <p className="text-slate-500 text-xs">{c.env_clientes?.nombre ?? ""}</p>
+                  </td>
+                  <td className="px-4 py-3 text-slate-400 text-xs">
+                    {new Date(c.created_at).toLocaleDateString("es-PE")}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono font-bold text-blue-300">
+                    S/ {fmt(Number(c.total))}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <div className="flex flex-col items-center gap-1">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${ESTADO_COLOR[c.estado]}`}>
+                        {c.estado}
+                      </span>
+                      {badge === "nuevo" && (
+                        <span className="text-xs px-2 py-0.5 rounded bg-green-600 text-white font-bold tracking-wide animate-pulse">
+                          NUEVO
+                        </span>
+                      )}
+                      {badge === "actualizado" && (
+                        <span className="text-xs px-2 py-0.5 rounded bg-amber-600 text-white font-bold tracking-wide">
+                          ACTUALIZADO
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <div className="flex items-center justify-center gap-1 flex-wrap">
+                      <Link href={`/cotizaciones/${c.id}`} className="text-xs text-blue-400 hover:underline">Ver</Link>
+                      <span className="text-slate-600">|</span>
+                      <Link href={`/cotizaciones/${c.id}/imprimir`} className="text-xs text-slate-400 hover:text-white">Imprimir</Link>
+                      {c.estado === "borrador" && (
+                        <>
+                          <span className="text-slate-600">|</span>
+                          <button onClick={() => cambiarEstado(c.id, "enviada")} className="text-xs text-yellow-400 hover:underline">Enviar</button>
+                        </>
+                      )}
+                      {c.estado === "enviada" && (
+                        <>
+                          <span className="text-slate-600">|</span>
+                          <button onClick={() => cambiarEstado(c.id, "aprobada")} className="text-xs text-green-400 hover:underline">Aprobar</button>
+                          <span className="text-slate-600">|</span>
+                          <button onClick={() => cambiarEstado(c.id, "rechazada")} className="text-xs text-red-400 hover:underline">Rechazar</button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
