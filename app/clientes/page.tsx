@@ -1,30 +1,60 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { supabase, type Cliente } from "@/lib/supabase";
+import { createClient } from "@supabase/supabase-js";
+import { type Cliente } from "@/lib/supabase";
+
+const SUPABASE_URL  = "https://gamnenyakraafruvbkin.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdhbW5lbnlha3JhYWZydXZia2luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NzU4NDQsImV4cCI6MjA4NTU1MTg0NH0.UpolMRzWNfd4hqBeYvnTrrvDu1C1rmrNXKvnO82y_OQ";
 
 export default function ClientesPage() {
-  const [clientes, setClientes] = useState<Cliente[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [form, setForm]         = useState({ nombre: "", empresa: "", ruc: "", email: "", telefono: "", direccion: "" });
-  const [saving, setSaving]     = useState(false);
-  const [search, setSearch]     = useState("");
+  const sbRef    = useRef(createClient(SUPABASE_URL, SUPABASE_ANON));
+  const [clientes,    setClientes]    = useState<Cliente[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [realtimeOk,  setRealtimeOk]  = useState<boolean | null>(null);
+  const [form,        setForm]        = useState({ nombre: "", empresa: "", ruc: "", email: "", telefono: "", direccion: "" });
+  const [saving,      setSaving]      = useState(false);
+  const [search,      setSearch]      = useState("");
 
-  async function cargar() {
-    const { data } = await supabase.from("env_clientes").select("*").order("empresa");
-    setClientes((data ?? []) as Cliente[]);
-    setLoading(false);
-  }
-  useEffect(() => { cargar(); }, []);
+  useEffect(() => {
+    const sb = sbRef.current;
+
+    // Initial load
+    sb.from("env_clientes").select("*").order("empresa").then(({ data }) => {
+      setClientes((data ?? []) as Cliente[]);
+      setLoading(false);
+    });
+
+    // Realtime subscription
+    const channel = sb
+      .channel(`clientes_rt_${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "env_clientes" },
+        (payload) => {
+          const nuevo = payload.new as Cliente;
+          setClientes((prev) =>
+            [...prev, nuevo].sort((a, b) => a.empresa.localeCompare(b.empresa))
+          );
+        }
+      )
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "env_clientes" },
+        (payload) => {
+          const updated = payload.new as Cliente;
+          setClientes((prev) => prev.map((c) => c.id === updated.id ? updated : c));
+        }
+      )
+      .subscribe((status) => setRealtimeOk(status === "SUBSCRIBED"));
+
+    return () => { sb.removeChannel(channel); };
+  }, []);
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     if (!form.nombre || !form.empresa) return;
     setSaving(true);
-    await supabase.from("env_clientes").insert(form);
+    await sbRef.current.from("env_clientes").insert(form);
+    // Realtime will add it to the list — just reset the form
     setForm({ nombre: "", empresa: "", ruc: "", email: "", telefono: "", direccion: "" });
     setSaving(false);
-    cargar();
   }
 
   const filtrados = clientes.filter((c) =>
@@ -34,7 +64,11 @@ export default function ClientesPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Clientes</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold">Clientes</h1>
+          {realtimeOk === true  && <span className="text-xs px-2 py-0.5 rounded-full bg-green-900 text-green-300 font-mono">● En vivo</span>}
+          {realtimeOk === false && <span className="text-xs px-2 py-0.5 rounded-full bg-red-900 text-red-300 font-mono">✕ Sin conexión</span>}
+        </div>
         <span className="text-slate-400 text-sm">{clientes.length} registrados</span>
       </div>
 
@@ -63,7 +97,7 @@ export default function ClientesPage() {
         </div>
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || !form.nombre || !form.empresa}
           className="mt-4 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-sm px-5 py-2 rounded-lg transition-colors"
         >
           {saving ? "Guardando..." : "Agregar cliente"}

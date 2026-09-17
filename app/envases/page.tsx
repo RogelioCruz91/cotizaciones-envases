@@ -1,41 +1,79 @@
 "use client";
-import { useEffect, useState } from "react";
-import { supabase, fmt, CAT_COLOR, type Envase } from "@/lib/supabase";
+import { useEffect, useRef, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
+import { fmt, CAT_COLOR, type Envase } from "@/lib/supabase";
+
+const SUPABASE_URL  = "https://gamnenyakraafruvbkin.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdhbW5lbnlha3JhYWZydXZia2luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NzU4NDQsImV4cCI6MjA4NTU1MTg0NH0.UpolMRzWNfd4hqBeYvnTrrvDu1C1rmrNXKvnO82y_OQ";
 
 const CATEGORIAS = ["Big Bag", "Bulk Bag", "Bolsas de papel", "Bolsas Mixtas", "Otros"] as const;
 
 export default function EnvasesPage() {
-  const [envases, setEnvases]   = useState<Envase[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [cat, setCat]           = useState("Todos");
-  const [search, setSearch]     = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [saving, setSaving]     = useState(false);
+  const sbRef   = useRef(createClient(SUPABASE_URL, SUPABASE_ANON));
+  const [envases,     setEnvases]     = useState<Envase[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [realtimeOk,  setRealtimeOk]  = useState<boolean | null>(null);
+  const [cat,         setCat]         = useState("Todos");
+  const [search,      setSearch]      = useState("");
+  const [showForm,    setShowForm]    = useState(false);
+  const [saving,      setSaving]      = useState(false);
   const [form, setForm] = useState({
     nombre: "", categoria: "Big Bag", material: "", capacidad: "",
     unidad: "unidad", precio_unitario: "", stock: "", descripcion: "",
   });
 
-  async function cargar() {
-    const { data } = await supabase.from("env_envases").select("*").eq("activo", true).order("categoria").order("nombre");
-    setEnvases((data ?? []) as Envase[]);
-    setLoading(false);
-  }
-  useEffect(() => { cargar(); }, []);
+  useEffect(() => {
+    const sb = sbRef.current;
+
+    // Initial load
+    sb.from("env_envases").select("*").eq("activo", true).order("categoria").order("nombre").then(({ data }) => {
+      setEnvases((data ?? []) as Envase[]);
+      setLoading(false);
+    });
+
+    // Realtime subscription
+    const channel = sb
+      .channel(`envases_rt_${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "env_envases" },
+        (payload) => {
+          const nuevo = payload.new as Envase;
+          if (!nuevo.activo) return;
+          setEnvases((prev) =>
+            [...prev, nuevo].sort((a, b) =>
+              a.categoria.localeCompare(b.categoria) || a.nombre.localeCompare(b.nombre)
+            )
+          );
+        }
+      )
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "env_envases" },
+        (payload) => {
+          const updated = payload.new as Envase;
+          setEnvases((prev) =>
+            updated.activo
+              ? prev.map((e) => e.id === updated.id ? updated : e)
+              : prev.filter((e) => e.id !== updated.id)
+          );
+        }
+      )
+      .subscribe((status) => setRealtimeOk(status === "SUBSCRIBED"));
+
+    return () => { sb.removeChannel(channel); };
+  }, []);
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     if (!form.nombre || !form.precio_unitario) return;
     setSaving(true);
-    await supabase.from("env_envases").insert({
+    await sbRef.current.from("env_envases").insert({
       ...form,
+      activo: true,
       precio_unitario: parseFloat(form.precio_unitario),
       stock: parseInt(form.stock) || 0,
     });
+    // Realtime adds it to the list — just reset the form
     setForm({ nombre: "", categoria: "Big Bag", material: "", capacidad: "", unidad: "unidad", precio_unitario: "", stock: "", descripcion: "" });
     setShowForm(false);
     setSaving(false);
-    cargar();
   }
 
   const filtrados = envases
@@ -45,7 +83,11 @@ export default function EnvasesPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Catálogo de Envases</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold">Catálogo de Envases</h1>
+          {realtimeOk === true  && <span className="text-xs px-2 py-0.5 rounded-full bg-green-900 text-green-300 font-mono">● En vivo</span>}
+          {realtimeOk === false && <span className="text-xs px-2 py-0.5 rounded-full bg-red-900 text-red-300 font-mono">✕ Sin conexión</span>}
+        </div>
         <button
           onClick={() => setShowForm((v) => !v)}
           className="bg-blue-700 hover:bg-blue-600 text-white text-sm px-4 py-2 rounded-lg transition-colors"
@@ -60,12 +102,12 @@ export default function EnvasesPage() {
           <h2 className="font-semibold text-sm mb-4 text-slate-300">Nuevo envase</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {[
-              { key: "nombre",         label: "Nombre *",          type: "text",   placeholder: "Big Bag 1000 kg" },
-              { key: "material",       label: "Material",          type: "text",   placeholder: "Polipropileno tejido" },
-              { key: "capacidad",      label: "Capacidad",         type: "text",   placeholder: "1000 kg" },
-              { key: "unidad",         label: "Unidad de venta",   type: "text",   placeholder: "unidad / ciento / millar" },
-              { key: "precio_unitario",label: "Precio unitario *", type: "number", placeholder: "0.00" },
-              { key: "stock",          label: "Stock",             type: "number", placeholder: "0" },
+              { key: "nombre",          label: "Nombre *",          type: "text",   placeholder: "Big Bag 1000 kg" },
+              { key: "material",        label: "Material",          type: "text",   placeholder: "Polipropileno tejido" },
+              { key: "capacidad",       label: "Capacidad",         type: "text",   placeholder: "1000 kg" },
+              { key: "unidad",          label: "Unidad de venta",   type: "text",   placeholder: "unidad / ciento / millar" },
+              { key: "precio_unitario", label: "Precio unitario *", type: "number", placeholder: "0.00" },
+              { key: "stock",           label: "Stock",             type: "number", placeholder: "0" },
             ].map(({ key, label, type, placeholder }) => (
               <div key={key}>
                 <label className="block text-xs text-slate-400 mb-1">{label}</label>
@@ -135,10 +177,10 @@ export default function EnvasesPage() {
           <div key={e.id} className="bg-slate-800 rounded-xl border border-slate-700 p-4 flex flex-col gap-2">
             <div className="flex items-start justify-between gap-2">
               <p className="text-white font-medium text-sm leading-tight">{e.nombre}</p>
-              <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${CAT_COLOR[e.categoria]}`}>{e.categoria}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${CAT_COLOR[e.categoria] ?? "bg-slate-700 text-slate-300"}`}>{e.categoria}</span>
             </div>
-            {e.material && <p className="text-slate-500 text-xs">{e.material}</p>}
-            {e.capacidad && <p className="text-slate-400 text-xs">Capacidad: {e.capacidad}</p>}
+            {e.material   && <p className="text-slate-500 text-xs">{e.material}</p>}
+            {e.capacidad  && <p className="text-slate-400 text-xs">Capacidad: {e.capacidad}</p>}
             {e.descripcion && <p className="text-slate-500 text-xs leading-tight">{e.descripcion}</p>}
             <div className="flex items-center justify-between mt-auto pt-2 border-t border-slate-700">
               <div>
