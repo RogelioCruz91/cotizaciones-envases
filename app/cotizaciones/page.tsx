@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 import { fmt, ESTADO_COLOR, type Cotizacion } from "@/lib/supabase";
+import { getUsuario } from "@/lib/usuario";
 
 const SUPABASE_URL = "https://gamnenyakraafruvbkin.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdhbW5lbnlha3JhYWZydXZia2luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NzU4NDQsImV4cCI6MjA4NTU1MTg0NH0.UpolMRzWNfd4hqBeYvnTrrvDu1C1rmrNXKvnO82y_OQ";
@@ -89,11 +90,22 @@ export default function CotizacionesPage() {
   }, []);
 
   async function cambiarEstado(id: number, estado: string) {
+    const anterior = cotizaciones.find((c) => c.id === id)?.estado;
     // Optimistic update
     setCotizaciones((prev) =>
       prev.map((c) => c.id === id ? { ...c, estado: estado as Cotizacion["estado"] } : c)
     );
     await sbRef.current.from("env_cotizaciones").update({ estado }).eq("id", id);
+    if (anterior && anterior !== estado) {
+      await sbRef.current.from("env_actividad").insert({
+        cotizacion_id: id,
+        usuario: getUsuario(),
+        tipo: "estado",
+        descripcion: "Estado actualizado",
+        dato_anterior: anterior,
+        dato_nuevo: estado,
+      });
+    }
   }
 
   // ── Drag & drop handlers ──────────────────────────────────────
