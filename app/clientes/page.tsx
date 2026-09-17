@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { supabase, type Cliente } from "@/lib/supabase";
 
 export default function ClientesPage() {
@@ -88,13 +89,14 @@ export default function ClientesPage() {
               <th className="text-left px-4 py-3">RUC</th>
               <th className="text-left px-4 py-3">Email</th>
               <th className="text-left px-4 py-3">Teléfono</th>
+              <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-700">
             {loading ? (
-              <tr><td colSpan={5} className="text-center text-slate-500 py-8">Cargando...</td></tr>
+              <tr><td colSpan={6} className="text-center text-slate-500 py-8">Cargando...</td></tr>
             ) : filtrados.length === 0 ? (
-              <tr><td colSpan={5} className="text-center text-slate-500 py-8">Sin clientes.</td></tr>
+              <tr><td colSpan={6} className="text-center text-slate-500 py-8">Sin clientes.</td></tr>
             ) : filtrados.map((c) => (
               <tr key={c.id} className="hover:bg-slate-700/40 transition-colors">
                 <td className="px-4 py-3 font-medium text-white">{c.empresa}</td>
@@ -102,6 +104,9 @@ export default function ClientesPage() {
                 <td className="px-4 py-3 text-slate-400 font-mono text-xs">{c.ruc ?? "—"}</td>
                 <td className="px-4 py-3 text-slate-400 text-xs">{c.email ?? "—"}</td>
                 <td className="px-4 py-3 text-slate-400">{c.telefono ?? "—"}</td>
+                <td className="px-4 py-3 text-right">
+                  <Link href={`/clientes/${c.id}`} className="text-xs text-blue-400 hover:underline">Ver perfil →</Link>
+                </td>
               </tr>
             ))}
           </tbody>
