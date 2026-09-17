@@ -241,7 +241,7 @@ export default function CotizacionesPage() {
       const k = mesKey(c.created_at);
       (map[k] ??= []).push(c);
     }
-    for (const [k, items] of Object.entries(map).sort((a, b) => b.localeCompare(a))) {
+    for (const [k, items] of Object.entries(map).sort((a, b) => b[0].localeCompare(a[0]))) {
       grupos.push({ key: k, label: mesLabel(items[0].created_at), items });
     }
   }
