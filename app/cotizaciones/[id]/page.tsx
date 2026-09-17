@@ -247,6 +247,9 @@ export default function DetalleCotizacion() {
         <Link href={`/cotizaciones/${id}/imprimir`} className="bg-slate-700 hover:bg-slate-600 text-white text-sm px-4 py-2 rounded-lg transition-colors">
           🖨️ Imprimir / PDF
         </Link>
+        <Link href={`/cotizaciones/${id}/editar`} className="bg-slate-700 hover:bg-slate-600 text-white text-sm px-4 py-2 rounded-lg transition-colors">
+          ✏️ Editar
+        </Link>
         {cot.estado === "borrador" && (
           <button onClick={() => cambiarEstado("enviada")} className="bg-yellow-700 hover:bg-yellow-600 text-white text-sm px-4 py-2 rounded-lg transition-colors">
             Marcar como Enviada

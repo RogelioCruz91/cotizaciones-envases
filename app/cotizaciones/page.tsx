@@ -337,6 +337,8 @@ export default function CotizacionesPage() {
                         <div className="flex items-center justify-center gap-1 flex-wrap">
                           <Link href={`/cotizaciones/${c.id}`} className="text-xs text-blue-400 hover:underline">Ver</Link>
                           <span className="text-slate-600">|</span>
+                          <Link href={`/cotizaciones/${c.id}/editar`} className="text-xs text-slate-400 hover:text-white">Editar</Link>
+                          <span className="text-slate-600">|</span>
                           <Link href={`/cotizaciones/${c.id}/imprimir`} className="text-xs text-slate-400 hover:text-white">Imprimir</Link>
                           {c.estado === "borrador" && (
                             <><span className="text-slate-600">|</span>
