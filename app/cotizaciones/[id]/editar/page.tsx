@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { supabase, fmt, IGV, type Cliente, type Envase } from "@/lib/supabase";
 import { getUsuario } from "@/lib/usuario";
@@ -16,6 +16,16 @@ function calcItem(item: ItemRow) {
   return item.cantidad * item.precio_unitario * (1 - item.descuento / 100);
 }
 
+// Snapshot of original values for change comparison
+type Original = {
+  clienteId: number;
+  clienteEmpresa: string;
+  vigencia: number;
+  descGlobal: number;
+  notas: string;
+  itemsHash: string;
+};
+
 export default function EditarCotizacion() {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
@@ -31,6 +41,7 @@ export default function EditarCotizacion() {
   const [descGlobal, setDescGlobal] = useState(0);
   const [items, setItems] = useState<ItemRow[]>([]);
   const [numero, setNumero] = useState("");
+  const originalRef = useRef<Original | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -41,29 +52,40 @@ export default function EditarCotizacion() {
         .eq("id", id)
         .single(),
     ]).then(([{ data: c }, { data: e }, { data: cot }]) => {
-      setClientes((c ?? []) as Cliente[]);
+      const clientesList = (c ?? []) as Cliente[];
+      setClientes(clientesList);
       setEnvases((e ?? []) as Envase[]);
       if (cot) {
+        const itemsLoaded = (cot.env_cotizacion_items ?? []).map((it: {
+          envase_id: number | null;
+          descripcion: string;
+          cantidad: number;
+          precio_unitario: number;
+          descuento: number;
+        }) => ({
+          envase_id: it.envase_id,
+          descripcion: it.descripcion,
+          cantidad: it.cantidad,
+          precio_unitario: Number(it.precio_unitario),
+          descuento: Number(it.descuento),
+        }));
+
         setClienteId(cot.cliente_id);
         setNotas(cot.notas ?? "");
         setVigencia(cot.vigencia_dias);
         setDescGlobal(Number(cot.descuento_global));
         setNumero(cot.numero);
-        setItems(
-          (cot.env_cotizacion_items ?? []).map((it: {
-            envase_id: number | null;
-            descripcion: string;
-            cantidad: number;
-            precio_unitario: number;
-            descuento: number;
-          }) => ({
-            envase_id: it.envase_id,
-            descripcion: it.descripcion,
-            cantidad: it.cantidad,
-            precio_unitario: it.precio_unitario,
-            descuento: it.descuento,
-          }))
-        );
+        setItems(itemsLoaded);
+
+        const empresa = clientesList.find((cl) => cl.id === cot.cliente_id)?.empresa ?? String(cot.cliente_id);
+        originalRef.current = {
+          clienteId:      cot.cliente_id,
+          clienteEmpresa: empresa,
+          vigencia:       cot.vigencia_dias,
+          descGlobal:     Number(cot.descuento_global),
+          notas:          cot.notas ?? "",
+          itemsHash:      JSON.stringify(itemsLoaded),
+        };
       }
       setLoading(false);
     });
@@ -100,16 +122,16 @@ export default function EditarCotizacion() {
     setSaving(true);
 
     await supabase.from("env_cotizaciones").update({
-      cliente_id:      clienteId,
-      subtotal:        subtotalConDesc,
-      igv:             igvMonto,
+      cliente_id:       clienteId,
+      subtotal:         subtotalConDesc,
+      igv:              igvMonto,
       total,
       descuento_global: descGlobal,
       notas,
-      vigencia_dias:   vigencia,
+      vigencia_dias:    vigencia,
     }).eq("id", id);
 
-    // Replace items: delete old, insert new
+    // Replace items
     await supabase.from("env_cotizacion_items").delete().eq("cotizacion_id", id);
     await supabase.from("env_cotizacion_items").insert(
       items
@@ -125,12 +147,39 @@ export default function EditarCotizacion() {
         }))
     );
 
-    await supabase.from("env_actividad").insert({
-      cotizacion_id: Number(id),
-      usuario:       getUsuario(),
-      tipo:          "edicion",
-      descripcion:   "Cotización editada",
-    });
+    // Build one activity record per changed field
+    const orig = originalRef.current;
+    const usuario = getUsuario();
+    const logs: object[] = [];
+
+    if (orig) {
+      if (Number(clienteId) !== orig.clienteId) {
+        const nuevaEmpresa = clientes.find((cl) => cl.id === Number(clienteId))?.empresa ?? String(clienteId);
+        logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Cliente", dato_anterior: orig.clienteEmpresa, dato_nuevo: nuevaEmpresa });
+      }
+      if (vigencia !== orig.vigencia) {
+        logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Vigencia", dato_anterior: `${orig.vigencia} días`, dato_nuevo: `${vigencia} días` });
+      }
+      if (descGlobal !== orig.descGlobal) {
+        logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Descuento global", dato_anterior: `${orig.descGlobal}%`, dato_nuevo: `${descGlobal}%` });
+      }
+      if (notas.trim() !== orig.notas.trim()) {
+        logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Notas", dato_anterior: orig.notas || "(vacío)", dato_nuevo: notas.trim() || "(vacío)" });
+      }
+      const newItemsHash = JSON.stringify(items.filter((it) => it.descripcion).map((it) => ({ ...it, precio_unitario: Number(it.precio_unitario), descuento: Number(it.descuento) })));
+      if (newItemsHash !== orig.itemsHash) {
+        const origCount = JSON.parse(orig.itemsHash).length;
+        const newCount  = items.filter((it) => it.descripcion).length;
+        logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""}`, dato_nuevo: `${newCount} línea${newCount !== 1 ? "s" : ""}` });
+      }
+    }
+
+    if (logs.length === 0) {
+      // No fields changed — still record the edit action
+      logs.push({ cotizacion_id: Number(id), usuario, tipo: "edicion", descripcion: "Cotización editada (sin cambios)" });
+    }
+
+    await supabase.from("env_actividad").insert(logs);
 
     router.push(`/cotizaciones/${id}`);
   }

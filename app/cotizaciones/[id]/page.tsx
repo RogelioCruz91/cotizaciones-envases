@@ -300,7 +300,7 @@ export default function DetalleCotizacion() {
                           <span className="text-white text-sm font-semibold">{a.usuario}</span>
                           <span className="text-slate-500 text-xs">{tiempoRelativo(a.created_at)}</span>
                         </div>
-                        {a.tipo === "estado" && a.dato_anterior && a.dato_nuevo ? (
+                        {a.dato_anterior && a.dato_nuevo ? (
                           <p className="text-sm mt-0.5">
                             <span className="text-slate-400">{a.descripcion}: </span>
                             <span className="text-slate-300">{a.dato_anterior}</span>
