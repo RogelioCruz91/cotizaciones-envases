@@ -84,6 +84,7 @@ export default function EditarCotizacion() {
           vigencia:       cot.vigencia_dias,
           descGlobal:     Number(cot.descuento_global),
           notas:          cot.notas ?? "",
+          // Store raw items so guardar() can compare with normalize()
           itemsHash:      JSON.stringify(itemsLoaded),
         };
       }
@@ -166,11 +167,25 @@ export default function EditarCotizacion() {
       if (notas.trim() !== orig.notas.trim()) {
         logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Notas", dato_anterior: orig.notas || "(vacío)", dato_nuevo: notas.trim() || "(vacío)" });
       }
-      const newItemsHash = JSON.stringify(items.filter((it) => it.descripcion).map((it) => ({ ...it, precio_unitario: Number(it.precio_unitario), descuento: Number(it.descuento) })));
-      if (newItemsHash !== orig.itemsHash) {
-        const origCount = JSON.parse(orig.itemsHash).length;
+      const normalize = (arr: ItemRow[]) =>
+        arr.filter((it) => it.descripcion).map((it) => ({
+          envase_id:       it.envase_id ?? null,
+          descripcion:     it.descripcion.trim(),
+          cantidad:        Number(it.cantidad),
+          precio_unitario: Math.round(Number(it.precio_unitario) * 100),
+          descuento:       Math.round(Number(it.descuento) * 100),
+        }));
+      const origItems = JSON.parse(orig.itemsHash) as ItemRow[];
+      const origNorm  = JSON.stringify(normalize(origItems));
+      const newNorm   = JSON.stringify(normalize(items));
+      if (origNorm !== newNorm) {
+        const origCount = origItems.filter((it) => it.descripcion).length;
         const newCount  = items.filter((it) => it.descripcion).length;
-        logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""}`, dato_nuevo: `${newCount} línea${newCount !== 1 ? "s" : ""}` });
+        if (origCount !== newCount) {
+          logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""}`, dato_nuevo: `${newCount} línea${newCount !== 1 ? "s" : ""}` });
+        } else {
+          logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""} (precio / cantidad)`, dato_nuevo: "Actualizado" });
+        }
       }
     }
 
