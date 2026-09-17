@@ -1,40 +1,115 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { supabase, fmt, ESTADO_COLOR, type Cotizacion } from "@/lib/supabase";
+import { createClient } from "@supabase/supabase-js";
+import { fmt, ESTADO_COLOR, type Cotizacion } from "@/lib/supabase";
+
+// Fresh client per component — required for Supabase Realtime
+const supabase = createClient(
+  "https://gamnenyakraafruvbkin.supabase.co",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdhbW5lbnlha3JhYWZydXZia2luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NzU4NDQsImV4cCI6MjA4NTU1MTg0NH0.UpolMRzWNfd4hqBeYvnTrrvDu1C1rmrNXKvnO82y_OQ"
+);
 
 const ESTADOS = ["todos", "borrador", "enviada", "aprobada", "rechazada"] as const;
 
+// Highlight state: cotizacion id → css class
+type HlMap = Record<number, string>;
+
 export default function CotizacionesPage() {
   const [cotizaciones, setCotizaciones] = useState<Cotizacion[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]           = useState(true);
+  const [realtimeOk, setRealtimeOk]     = useState<boolean | null>(null);
   const [filtroEstado, setFiltroEstado] = useState("todos");
-  const [search, setSearch] = useState("");
+  const [search, setSearch]             = useState("");
+  const [highlights, setHighlights]     = useState<HlMap>({});
+
+  function highlight(id: number, cls: string) {
+    setHighlights((prev) => ({ ...prev, [id]: cls }));
+    setTimeout(() => setHighlights((prev) => { const n = { ...prev }; delete n[id]; return n; }), 2500);
+  }
+
+  async function fetchCotizacion(id: number): Promise<Cotizacion | null> {
+    const { data } = await supabase
+      .from("env_cotizaciones")
+      .select("*, env_clientes(nombre,empresa)")
+      .eq("id", id)
+      .single();
+    return data as Cotizacion | null;
+  }
 
   useEffect(() => {
+    // Initial load
     supabase
       .from("env_cotizaciones")
       .select("*, env_clientes(nombre,empresa)")
       .order("created_at", { ascending: false })
       .then(({ data }) => { setCotizaciones((data ?? []) as Cotizacion[]); setLoading(false); });
+
+    // Realtime subscription
+    const channel = supabase
+      .channel("env_cotizaciones_rt")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "env_cotizaciones" },
+        async ({ new: row }) => {
+          // Fetch with joins since CDC payload lacks related data
+          const full = await fetchCotizacion(row.id as number);
+          if (!full) return;
+          setCotizaciones((prev) => [full, ...prev]);
+          highlight(full.id, "bg-green-900/40");
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "env_cotizaciones" },
+        async ({ new: row }) => {
+          const full = await fetchCotizacion(row.id as number);
+          if (!full) return;
+          setCotizaciones((prev) =>
+            prev.map((c) => (c.id === full.id ? full : c))
+          );
+          highlight(full.id, "bg-amber-900/40");
+        }
+      )
+      .subscribe((status) => {
+        setRealtimeOk(status === "SUBSCRIBED");
+      });
+
+    return () => { supabase.removeChannel(channel); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function cambiarEstado(id: number, estado: string) {
     await supabase.from("env_cotizaciones").update({ estado }).eq("id", id);
-    setCotizaciones((prev) => prev.map((c) => c.id === id ? { ...c, estado: estado as Cotizacion["estado"] } : c));
+    // Realtime UPDATE event will handle the UI update
   }
 
   const filtradas = cotizaciones
     .filter((c) => filtroEstado === "todos" || c.estado === filtroEstado)
-    .filter((c) => `${c.numero} ${c.env_clientes?.empresa ?? ""} ${c.env_clientes?.nombre ?? ""}`.toLowerCase().includes(search.toLowerCase()));
+    .filter((c) =>
+      `${c.numero} ${c.env_clientes?.empresa ?? ""} ${c.env_clientes?.nombre ?? ""}`
+        .toLowerCase()
+        .includes(search.toLowerCase())
+    );
 
   const totalFiltradas = filtradas.reduce((s, c) => s + Number(c.total), 0);
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Cotizaciones</h1>
-        <Link href="/cotizaciones/nueva" className="bg-blue-700 hover:bg-blue-600 text-white text-sm px-4 py-2 rounded-lg transition-colors">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold">Cotizaciones</h1>
+          {realtimeOk === true && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-green-900 text-green-300 font-mono">● En vivo</span>
+          )}
+          {realtimeOk === false && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-red-900 text-red-300 font-mono">✕ Sin conexión</span>
+          )}
+        </div>
+        <Link
+          href="/cotizaciones/nueva"
+          className="bg-blue-700 hover:bg-blue-600 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+        >
           + Nueva Cotización
         </Link>
       </div>
@@ -45,7 +120,9 @@ export default function CotizacionesPage() {
           <button
             key={e}
             onClick={() => setFiltroEstado(e)}
-            className={`text-xs px-3 py-1.5 rounded-full capitalize transition-colors ${filtroEstado === e ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}
+            className={`text-xs px-3 py-1.5 rounded-full capitalize transition-colors ${
+              filtroEstado === e ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
+            }`}
           >
             {e}
           </button>
@@ -85,18 +162,29 @@ export default function CotizacionesPage() {
             ) : filtradas.length === 0 ? (
               <tr><td colSpan={6} className="text-center text-slate-500 py-10">Sin cotizaciones.</td></tr>
             ) : filtradas.map((c) => (
-              <tr key={c.id} className="hover:bg-slate-700/40 transition-colors">
+              <tr
+                key={c.id}
+                className={`transition-colors duration-700 ${highlights[c.id] ?? "hover:bg-slate-700/40"}`}
+              >
                 <td className="px-4 py-3">
-                  <Link href={`/cotizaciones/${c.id}`} className="text-blue-400 hover:underline font-mono font-medium">{c.numero}</Link>
+                  <Link href={`/cotizaciones/${c.id}`} className="text-blue-400 hover:underline font-mono font-medium">
+                    {c.numero}
+                  </Link>
                 </td>
                 <td className="px-4 py-3">
                   <p className="text-white">{c.env_clientes?.empresa ?? "—"}</p>
                   <p className="text-slate-500 text-xs">{c.env_clientes?.nombre ?? ""}</p>
                 </td>
-                <td className="px-4 py-3 text-slate-400 text-xs">{new Date(c.created_at).toLocaleDateString("es-PE")}</td>
-                <td className="px-4 py-3 text-right font-mono font-bold text-blue-300">S/ {fmt(Number(c.total))}</td>
+                <td className="px-4 py-3 text-slate-400 text-xs">
+                  {new Date(c.created_at).toLocaleDateString("es-PE")}
+                </td>
+                <td className="px-4 py-3 text-right font-mono font-bold text-blue-300">
+                  S/ {fmt(Number(c.total))}
+                </td>
                 <td className="px-4 py-3 text-center">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${ESTADO_COLOR[c.estado]}`}>{c.estado}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${ESTADO_COLOR[c.estado]}`}>
+                    {c.estado}
+                  </span>
                 </td>
                 <td className="px-4 py-3 text-center">
                   <div className="flex items-center justify-center gap-1 flex-wrap">
