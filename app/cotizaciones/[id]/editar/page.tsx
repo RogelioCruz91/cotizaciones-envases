@@ -175,12 +175,33 @@ export default function EditarCotizacion() {
         logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Notas", dato_anterior: orig.notas || "(vacío)", dato_nuevo: notas.trim() || "(vacío)" });
       }
       if (itemsTouched.current) {
-        const origCount = (JSON.parse(orig.itemsHash) as ItemRow[]).filter((it) => it.descripcion).length;
-        const newCount  = items.filter((it) => it.descripcion).length;
-        if (origCount !== newCount) {
-          logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""}`, dato_nuevo: `${newCount} línea${newCount !== 1 ? "s" : ""}` });
-        } else {
-          logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Productos", dato_anterior: `${origCount} línea${origCount !== 1 ? "s" : ""}`, dato_nuevo: "Actualizado" });
+        const origItems = (JSON.parse(orig.itemsHash) as ItemRow[]).filter((it) => it.descripcion);
+        const newItems  = items.filter((it) => it.descripcion);
+        const maxLen    = Math.max(origItems.length, newItems.length);
+
+        for (let i = 0; i < maxLen; i++) {
+          const o = origItems[i];
+          const n = newItems[i];
+          const label = n?.descripcion || o?.descripcion || `Línea ${i + 1}`;
+
+          if (!o && n) {
+            logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Producto agregado", dato_anterior: null, dato_nuevo: n.descripcion });
+          } else if (o && !n) {
+            logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Producto eliminado", dato_anterior: o.descripcion, dato_nuevo: null });
+          } else if (o && n) {
+            if (o.descripcion.trim() !== n.descripcion.trim()) {
+              logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: "Descripción", dato_anterior: o.descripcion, dato_nuevo: n.descripcion });
+            }
+            if (Number(o.cantidad) !== Number(n.cantidad)) {
+              logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: `Cantidad (${label})`, dato_anterior: String(Number(o.cantidad)), dato_nuevo: String(Number(n.cantidad)) });
+            }
+            if (Number(o.precio_unitario).toFixed(2) !== Number(n.precio_unitario).toFixed(2)) {
+              logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: `Precio unitario (${label})`, dato_anterior: `S/ ${Number(o.precio_unitario).toFixed(2)}`, dato_nuevo: `S/ ${Number(n.precio_unitario).toFixed(2)}` });
+            }
+            if (Number(o.descuento).toFixed(2) !== Number(n.descuento).toFixed(2)) {
+              logs.push({ cotizacion_id: Number(id), usuario, tipo: "campo", descripcion: `Descuento (${label})`, dato_anterior: `${Number(o.descuento).toFixed(2)}%`, dato_nuevo: `${Number(n.descuento).toFixed(2)}%` });
+            }
+          }
         }
       }
     }
